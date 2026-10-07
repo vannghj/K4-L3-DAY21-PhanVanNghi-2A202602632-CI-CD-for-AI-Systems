@@ -50,3 +50,13 @@ Chỉ 24,8% mẫu thuộc lớp thu nhập > 50K, nên mô hình luôn đoán "t
 | Bước 3 (thêm `train_batch2`) | 0.7297 | 0.880 |
 
 **Nhận xét:** Gấp đôi dữ liệu chỉ làm F1 tăng 0.009 và accuracy tăng 0.004, tức 2 mẫu đúng thêm trên 500 mẫu holdout, nằm trong mức dao động. Lý do là `train_batch2` có cùng phân phối với `train_batch1` nên mang ít thông tin mới. Điều Bước 3 chứng minh là quy trình: commit dữ liệu tự kích hoạt cả bốn job và model mới được đưa lên VM mà không cần thao tác thủ công.
+
+---
+
+## 5. Phần Bonus Đã Thực Hiện
+
+- [ ] Bonus 1 - DagsHub: pipeline đã hỗ trợ qua secrets `MLFLOW_TRACKING_*`, đang chờ kết nối tài khoản.
+- [x] Bonus 2 - Ngưỡng 0.30 cho F1 0.7452 so với 0.7297 ở ngưỡng 0.5 (chọn trên chính holdout nên hơi lạc quan; API vẫn dùng 0.5).
+- [x] Bonus 3 - `detail.txt`: lớp thu nhập cao có precision 0.827, recall 0.653 (bỏ sót 43, gán nhầm 17). Nếu dùng để tìm khách cho sản phẩm tài chính cao cấp thì bỏ sót tốn kém hơn, nên ưu tiên recall, ví dụ hạ ngưỡng như Bonus 2.
+- [x] Bonus 4 - Model mới lên `candidate/`, chỉ promote sang `current/` khi F1 mới ≥ F1 cũ; params `n=200, lr=0.05, depth=3` (F1 0.6957 < 0.7297) bị hủy triển khai (ảnh 08).
+- [x] Bonus 5 - Tỷ lệ lớp dương 24.78%, lệch không quá 5 điểm nên không cảnh báo; `positive_rate` có trong `report.json`.
