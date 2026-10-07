@@ -9,6 +9,11 @@ on:
       - 'params.yaml'
   workflow_dispatch:
 
+# Chi cho phep mot pipeline chay tai mot thoi diem de artifacts/candidate/ khong bi ghi de giua chung
+concurrency:
+  group: income-model-cicd
+  cancel-in-progress: false
+
 jobs:
 
   # ---------------------------------------------------------------------------
@@ -37,6 +42,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # JOB 2 - TRAIN
   # Xac thuc cloud storage, pull du lieu bang DVC, huan luyen mo hinh, upload artifact.
+  # Model moi duoc upload len artifacts/candidate/ - chi duoc dua len
+  # artifacts/current/ o job Release sau khi qua Quality Gate.
   # Chi chay khi Job 1 (Unit Test) hoan thanh thanh cong.
   # ---------------------------------------------------------------------------
   train:
@@ -63,21 +70,56 @@ jobs:
           printf '%s' "$STORAGE_CREDENTIALS" > /tmp/sa-key.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
 
+      - name: Configure MLflow tracking (Bonus 1 - DagsHub)
+        # Neu da them secrets DagsHub thi ghi run len tracking server tu xa,
+        # neu chua thi MLflow ghi vao file store cuc bo cua runner.
+        env:
+          DAGSHUB_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          DAGSHUB_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          DAGSHUB_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+        run: |
+          if [ -n "$DAGSHUB_URI" ]; then
+            echo "MLFLOW_TRACKING_URI=$DAGSHUB_URI" >> $GITHUB_ENV
+            echo "MLFLOW_TRACKING_USERNAME=$DAGSHUB_USERNAME" >> $GITHUB_ENV
+            echo "MLFLOW_TRACKING_PASSWORD=$DAGSHUB_PASSWORD" >> $GITHUB_ENV
+            echo "MLflow tracking: DagsHub ($DAGSHUB_URI)"
+          else
+            echo "MLflow tracking: file store cuc bo (chua cau hinh DagsHub)"
+          fi
+
       - name: Pull data with DVC
         # Chi pull train_batch1.csv va holdout.csv (khong can train_batch2.csv)
         run: dvc pull data/train_batch1.csv.dvc data/holdout.csv.dvc
 
+      - name: Check data drift (Bonus 5)
+        # Canh bao neu ty le lop duong lech qua 5 diem phan tram so voi tham chieu 24.8%
+        run: |
+          python - <<'PYEOF'
+          import pandas as pd
+
+          REFERENCE, TOLERANCE = 0.248, 0.05
+          rate = pd.read_csv("data/train_batch1.csv")["target"].mean()
+          print(f"Ty le lop duong trong tap huan luyen: {rate:.2%} (tham chieu {REFERENCE:.1%})")
+          if abs(rate - REFERENCE) > TOLERANCE:
+              print(f"::warning title=Data drift::Ty le lop duong {rate:.2%} lech qua 5 diem phan tram so voi {REFERENCE:.1%}")
+          else:
+              print("Phan phoi lop on dinh, khong co data drift.")
+          PYEOF
+
       - name: Train model
         run: python src/train.py
+
+      - name: Detailed precision / recall report (Bonus 3)
+        run: python src/evaluate.py
 
       - name: Read report
         id: read_report
         run: |
+          cat outputs/report.json
           F1=$(python -c "import json; d=json.load(open('outputs/report.json')); print(d['f1_score'])")
-          echo "f1_score = $F1"
           echo "f1=$F1" >> $GITHUB_OUTPUT
 
-      - name: Upload model to Cloud Storage
+      - name: Upload candidate model to Cloud Storage
         env:
           ARTIFACT_BUCKET: ${{ secrets.ARTIFACT_BUCKET }}
         run: |
@@ -86,21 +128,25 @@ jobs:
           from google.cloud import storage
 
           bucket = storage.Client().bucket(os.environ["ARTIFACT_BUCKET"])
-          bucket.blob("artifacts/current/model.joblib").upload_from_filename("models/model.joblib")
-          print(f"Uploaded model to gs://{bucket.name}/artifacts/current/model.joblib")
+          bucket.blob("artifacts/candidate/model.joblib").upload_from_filename("models/model.joblib")
+          bucket.blob("artifacts/candidate/report.json").upload_from_filename("outputs/report.json")
+          print("Uploaded candidate model + report to artifacts/candidate/")
           PYEOF
 
-      - name: Save report as artifact
+      - name: Save reports as artifact
         uses: actions/upload-artifact@v4
         with:
           name: report
-          path: outputs/report.json
+          path: |
+            outputs/report.json
+            outputs/detail.txt
 
 
   # ---------------------------------------------------------------------------
   # JOB 3 - QUALITY GATE
-  # Kiem tra nguong chat luong (f1_score >= 0.65).
-  # Pipeline dung lai o day neu mo hinh chua dat yeu cau.
+  # 1) Kiem tra nguong chat luong (f1_score >= 0.65).
+  # 2) Bonus 4: so sanh voi model dang chay (artifacts/current/report.json),
+  #    chi cho trien khai khi F1 moi >= F1 cu.
   #
   # Luu y: nguong o day dat tren f1_score chu KHONG phai accuracy. Bo du lieu
   # Adult co ty le lop 75/25, nen mot mo hinh doan bua "thu nhap thap" cho moi
@@ -119,13 +165,53 @@ jobs:
           f1 = float("${{ needs.train.outputs.f1 }}")
           if f1 < 0.65:
               raise SystemExit(f"FAILED: f1_score {f1:.4f} < 0.65. Huy trien khai.")
-          print(f"PASSED: f1_score {f1:.4f} >= 0.65. Dang trien khai model.")
+          print(f"PASSED: f1_score {f1:.4f} >= 0.65.")
+          PYEOF
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Cloud Storage SDK
+        run: pip install google-cloud-storage==2.16.0
+
+      - name: Authenticate to Cloud Storage
+        env:
+          STORAGE_CREDENTIALS: ${{ secrets.STORAGE_CREDENTIALS }}
+        run: |
+          printf '%s' "$STORAGE_CREDENTIALS" > /tmp/sa-key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
+
+      - name: Compare with current production model (Bonus 4)
+        env:
+          ARTIFACT_BUCKET: ${{ secrets.ARTIFACT_BUCKET }}
+          NEW_F1: ${{ needs.train.outputs.f1 }}
+        run: |
+          python - <<'PYEOF'
+          import json
+          import os
+          from google.cloud import storage
+
+          new_f1 = float(os.environ["NEW_F1"])
+          blob = storage.Client().bucket(os.environ["ARTIFACT_BUCKET"]).blob("artifacts/current/report.json")
+          if not blob.exists():
+              print(f"Chua co model dang chay de so sanh. F1 moi = {new_f1:.4f} -> cho phep trien khai.")
+              raise SystemExit(0)
+
+          old_f1 = float(json.loads(blob.download_as_text())["f1_score"])
+          print(f"F1 model dang chay: {old_f1:.4f} | F1 model moi: {new_f1:.4f} | chenh lech: {new_f1 - old_f1:+.4f}")
+          if new_f1 < old_f1:
+              raise SystemExit(
+                  f"ROLLBACK: F1 moi {new_f1:.4f} < F1 hien tai {old_f1:.4f}. "
+                  "Huy trien khai, giu nguyen model dang chay."
+              )
+          print("PASSED: F1 moi >= F1 hien tai, cho phep trien khai.")
           PYEOF
 
 
   # ---------------------------------------------------------------------------
   # JOB 4 - RELEASE
-  # Trien khai len VM qua SSH.
+  # Dua model candidate len artifacts/current/ roi trien khai len VM qua SSH.
   # Chi chay khi Job 3 (Quality Gate) hoan thanh thanh cong.
   # ---------------------------------------------------------------------------
   release:
@@ -133,6 +219,34 @@ jobs:
     needs: quality-gate
     runs-on: ubuntu-latest
     steps:
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Cloud Storage SDK
+        run: pip install google-cloud-storage==2.16.0
+
+      - name: Authenticate to Cloud Storage
+        env:
+          STORAGE_CREDENTIALS: ${{ secrets.STORAGE_CREDENTIALS }}
+        run: |
+          printf '%s' "$STORAGE_CREDENTIALS" > /tmp/sa-key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
+
+      - name: Promote candidate model to current
+        env:
+          ARTIFACT_BUCKET: ${{ secrets.ARTIFACT_BUCKET }}
+        run: |
+          python - <<'PYEOF'
+          import os
+          from google.cloud import storage
+
+          bucket = storage.Client().bucket(os.environ["ARTIFACT_BUCKET"])
+          for name in ("model.joblib", "report.json"):
+              bucket.copy_blob(bucket.blob(f"artifacts/candidate/{name}"), bucket, f"artifacts/current/{name}")
+          print("Promoted artifacts/candidate/ -> artifacts/current/")
+          PYEOF
 
       - name: SSH deploy to VM
         uses: appleboy/ssh-action@v1.0.3

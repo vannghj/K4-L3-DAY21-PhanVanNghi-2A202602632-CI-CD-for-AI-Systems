@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 from src.train import train
+from src.evaluate import evaluate
 
 
 FEATURE_NAMES = [
@@ -67,6 +68,8 @@ def test_report_file_created(tmp_path):
         report = json.load(f)
     assert "f1_score" in report
     assert "accuracy" in report
+    assert 0.0 <= report["positive_rate"] <= 1.0
+    assert 0.1 <= report["best_threshold"] <= 0.9
 
 
 def test_model_file_created(tmp_path):
@@ -79,3 +82,19 @@ def test_model_file_created(tmp_path):
     )
 
     assert os.path.exists("models/model.joblib")
+
+
+def test_detail_report_created(tmp_path):
+    """Kiem tra evaluate() ghi confusion matrix va precision/recall ra file."""
+    train_path, eval_path = _make_temp_data(tmp_path)
+    train(
+        {"n_estimators": 10, "learning_rate": 0.1, "max_depth": 2},
+        data_path=train_path,
+        eval_path=eval_path,
+    )
+    out_path = str(tmp_path / "detail.txt")
+    report = evaluate(eval_path=eval_path, out_path=out_path)
+
+    assert os.path.exists(out_path)
+    assert "Confusion matrix" in report
+    assert "precision" in report and "recall" in report
