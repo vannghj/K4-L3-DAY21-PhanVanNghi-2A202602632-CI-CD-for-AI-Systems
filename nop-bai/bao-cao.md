@@ -55,7 +55,7 @@ Chỉ 24,8% mẫu thuộc lớp thu nhập > 50K, nên mô hình luôn đoán "t
 
 ## 5. Phần Bonus Đã Thực Hiện
 
-- [ ] Bonus 1 - DagsHub: pipeline đã hỗ trợ qua secrets `MLFLOW_TRACKING_*`, đang chờ kết nối tài khoản.
+- [x] Bonus 1 - Job Train ghi MLflow lên DagsHub qua secrets `MLFLOW_TRACKING_*`; run `righteous-bee-621` có đủ f1_score, accuracy, best_threshold (ảnh 06).
 - [x] Bonus 2 - Ngưỡng 0.30 cho F1 0.7452 so với 0.7297 ở ngưỡng 0.5 (chọn trên chính holdout nên hơi lạc quan; API vẫn dùng 0.5).
 - [x] Bonus 3 - `detail.txt`: lớp thu nhập cao có precision 0.827, recall 0.653 (bỏ sót 43, gán nhầm 17). Nếu dùng để tìm khách cho sản phẩm tài chính cao cấp thì bỏ sót tốn kém hơn, nên ưu tiên recall, ví dụ hạ ngưỡng như Bonus 2.
 - [x] Bonus 4 - Model mới lên `candidate/`, chỉ promote sang `current/` khi F1 mới ≥ F1 cũ; params `n=200, lr=0.05, depth=3` (F1 0.6957 < 0.7297) bị hủy triển khai (ảnh 08).
