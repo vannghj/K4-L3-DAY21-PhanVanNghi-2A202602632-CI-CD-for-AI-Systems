@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Họ và tên | Phan Văn Nghi |
+| Họ và tên | Phan Văn Nghị |
 | MSSV | 2A202602632 |
 | Lớp / Khóa | K4 |
 | Repo GitHub | https://github.com/vannghj/K4-L3-DAY21-PhanVanNghi-2A202602632-CI-CD-for-AI-Systems |
@@ -28,7 +28,7 @@
 
 ## 2. Vì Sao Ngưỡng Chất Lượng Đặt Trên F1 Chứ Không Phải Accuracy
 
-Chỉ 24,8% mẫu thuộc lớp thu nhập > 50K, nên mô hình luôn đoán "thu nhập thấp" vẫn đạt accuracy 0.752 dù không tìm ra được ai thu nhập cao; quality gate theo accuracy có thể cho mô hình đó đi qua. F1 lớp dương kết hợp precision và recall của chính lớp thu nhập cao, nên mô hình kia có F1 = 0. Không dùng `average="weighted"` hay `"macro"` vì chúng trộn F1 của lớp đa số (0.920) vào: với mô hình đã chọn, F1 lớp dương là 0.721 nhưng `macro` cho 0.821 và `weighted` cho 0.871, che mất việc bỏ sót lớp dương.
+Chỉ 24,8% mẫu thuộc lớp thu nhập > 50K, nên mô hình luôn đoán "thu nhập thấp" vẫn đạt accuracy 0.752 dù không tìm ra được ai thu nhập cao; quality gate theo accuracy có thể cho mô hình đó đi qua. F1 lớp dương kết hợp precision và recall của chính lớp thu nhập cao, nên mô hình kia có F1 = 0. Không dùng `average="weighted"` hay `"macro"` vì chúng trộn F1 của lớp đa số (0.920) vào: với mô hình đã chọn, F1 lớp dương là 0.721 nhưng `macro` cho 0.821 và `weighted` cho 0.871, che mất việc bỏ sót lớp dương. Ngưỡng này đã được kiểm chứng: khi push bộ params yếu (`n=50, lr=0.05, depth=2`), mô hình vẫn đạt accuracy 0.842 nhưng F1 chỉ 0.5907, nên Quality Gate thất bại và Release bị bỏ qua (ảnh `07-quality-gate-chan.png`).
 
 ---
 
